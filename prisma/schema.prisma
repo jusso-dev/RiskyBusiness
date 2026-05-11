@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organisation {
+  id          String                 @id @default(cuid())
+  name        String
+  members     OrganisationMember[]
+  borrowers   Borrower[]
+  applications LoanApplication[]
+  policies    RiskPolicyProfile[]
+  auditLogs   AuditLog[]
+  createdAt   DateTime              @default(now())
+}
+
+model User {
+  id        String                 @id @default(cuid())
+  email     String                 @unique
+  name      String
+  members   OrganisationMember[]
+  createdAt DateTime               @default(now())
+}
+
+model OrganisationMember {
+  id             String       @id @default(cuid())
+  userId         String
+  organisationId String
+  role           String       @default("owner")
+  user           User         @relation(fields: [userId], references: [id])
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+}
+
+model Borrower {
+  id                          String            @id @default(cuid())
+  organisationId              String
+  firstName                   String
+  lastName                    String
+  age                         Int
+  employmentStatus            String
+  employmentLengthMonths      Int
+  annualIncome                Float
+  monthlyIncome               Float
+  monthlyExpenses             Float
+  existingDebtMonthlyPayments Float
+  creditScore                 Int
+  creditHistoryLengthMonths   Int
+  recentDefaultsCount         Int
+  recentHardInquiriesCount    Int
+  addressStabilityMonths      Int
+  dependants                  Int
+  residencyStatus             String
+  industry                    String
+  savingsBalance              Float
+  bankTransactionRiskLevel    String
+  notes                       String
+  organisation                Organisation      @relation(fields: [organisationId], references: [id])
+  applications                LoanApplication[]
+  createdAt                   DateTime          @default(now())
+}
+
+model LoanApplication {
+  id                   String        @id @default(cuid())
+  organisationId       String
+  borrowerId           String
+  loanType             String
+  requestedAmount      Float
+  requestedTermMonths  Int
+  declaredPurpose      String
+  interestRateEstimate Float
+  collateralType       String
+  collateralValue      Float
+  status               String
+  organisation         Organisation  @relation(fields: [organisationId], references: [id])
+  borrower             Borrower      @relation(fields: [borrowerId], references: [id])
+  scores               ScoreResult[]
+  notes                AiRiskNote[]
+  createdAt            DateTime      @default(now())
+}
+
+model RiskSignal {
+  id                  String   @id @default(cuid())
+  key                 String   @unique
+  name                String
+  description         String
+  category            String
+  enabled             Boolean  @default(true)
+  weight              Float
+  direction           String
+  minValue            Float
+  maxValue            Float
+  warningThreshold    Float
+  highRiskThreshold   Float
+  explanationTemplate String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model RiskPolicyProfile {
+  id                       String                   @id @default(cuid())
+  organisationId           String
+  name                     String
+  description              String
+  approveBelowScore        Float
+  manualReviewBelowScore   Float
+  declineAtOrAboveScore    Float
+  organisation             Organisation             @relation(fields: [organisationId], references: [id])
+  signalConfigs            RiskPolicySignalConfig[]
+  scores                   ScoreResult[]
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+}
+
+model RiskPolicySignalConfig {
+  id                 String            @id @default(cuid())
+  policyProfileId    String
+  signalKey          String
+  enabled            Boolean
+  weight             Float
+  warningThreshold   Float
+  highRiskThreshold  Float
+  policyProfile      RiskPolicyProfile @relation(fields: [policyProfileId], references: [id])
+}
+
+model ScoreResult {
+  id                 String              @id @default(cuid())
+  applicationId      String
+  policyProfileId    String
+  totalRiskScore     Float
+  decision           String
+  confidence         Float
+  affordabilityScore Float
+  creditHistoryScore Float
+  stabilityScore     Float
+  behaviouralScore   Float
+  collateralScore    Float
+  applicationScore   Float
+  explanationSummary String
+  modelVersion       String
+  application        LoanApplication     @relation(fields: [applicationId], references: [id])
+  policyProfile      RiskPolicyProfile   @relation(fields: [policyProfileId], references: [id])
+  signals            ScoreSignalResult[]
+  notes              AiRiskNote[]
+  createdAt          DateTime            @default(now())
+}
+
+model ScoreSignalResult {
+  id               String      @id @default(cuid())
+  scoreResultId    String
+  signalKey        String
+  rawValue         Float
+  normalizedScore  Float
+  weightedScore    Float
+  weight           Float
+  thresholdStatus  String
+  explanation      String
+  scoreResult      ScoreResult @relation(fields: [scoreResultId], references: [id])
+}
+
+model AiRiskNote {
+  id            String          @id @default(cuid())
+  applicationId String
+  scoreResultId String
+  provider      String
+  summary       String
+  plainEnglishExplanation String
+  reviewQuestions Json
+  mitigationOptions Json
+  counterfactual String
+  promptMetadata String
+  application   LoanApplication @relation(fields: [applicationId], references: [id])
+  scoreResult   ScoreResult     @relation(fields: [scoreResultId], references: [id])
+  createdAt     DateTime        @default(now())
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organisationId String
+  entityType     String
+  entityId       String
+  eventType      String
+  message        String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  createdAt      DateTime     @default(now())
+}
+
+model SimulationRun {
+  id             String   @id @default(cuid())
+  organisationId String
+  status         String
+  settings       Json
+  results        Json
+  createdAt      DateTime @default(now())
+}
