@@ -1,14 +1,20 @@
-import { simulations } from "@/lib/data";
-import { badRequest, json, parseJson } from "@/lib/api";
+import { policyProfiles, simulations } from "@/lib/data";
+import { json, parseJsonBody, withErrorHandling } from "@/lib/api";
+import { BadRequestError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { runSimulation } from "@/lib/simulation";
 import { simulationSchema } from "@/lib/validation";
 
-export async function GET() {
-  return json(simulations);
-}
+export const GET = withErrorHandling(async () => json(simulations));
 
-export async function POST(request: Request) {
-  const parsed = simulationSchema.safeParse(await parseJson(request));
-  if (!parsed.success) return badRequest(parsed.error.flatten());
-  return json(runSimulation(parsed.data), { status: 201 });
-}
+export const POST = withErrorHandling(async (request: Request) => {
+  const data = await parseJsonBody(request, simulationSchema);
+  const known = new Set(policyProfiles.map((p) => p.id));
+  const unknown = data.policyProfileIds.filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    throw new BadRequestError("Unknown policyProfileIds", { unknown });
+  }
+  const run = runSimulation(data);
+  logger.info("Simulation completed", { id: run.id, count: data.count, riskiness: data.riskiness, policies: data.policyProfileIds });
+  return json(run, { status: 201 });
+});

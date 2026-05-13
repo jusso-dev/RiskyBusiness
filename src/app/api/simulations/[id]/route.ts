@@ -1,9 +1,12 @@
 import { simulations } from "@/lib/data";
-import { json, notFound } from "@/lib/api";
+import { json, withErrorHandling } from "@/lib/api";
+import { NotFoundError } from "@/lib/errors";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+type RouteContext = { params: Promise<{ id: string }> };
+
+export const GET = withErrorHandling(async (_request: Request, context: RouteContext) => {
+  const { id } = await context.params;
   const simulation = simulations.find((item) => item.id === id);
-  if (!simulation) return notFound("Simulation not found");
+  if (!simulation) throw new NotFoundError("Simulation", id);
   return json(simulation);
-}
+});

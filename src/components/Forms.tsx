@@ -2,18 +2,28 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { Borrower, LoanApplication, RiskPolicyProfile } from "@/types/domain";
+import { apiFetch, formatHttpError } from "@/lib/client";
+import type { Borrower, RiskPolicyProfile } from "@/types/domain";
 
 export function BorrowerForm() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function submit(formData: FormData) {
     setBusy(true);
-    const body = Object.fromEntries(formData.entries());
-    await fetch("/api/borrowers", { method: "POST", body: JSON.stringify(body) });
-    setBusy(false);
-    router.refresh();
+    setError(null);
+    try {
+      const body = Object.fromEntries(formData.entries());
+      await apiFetch("/api/borrowers", { method: "POST", body: JSON.stringify(body) });
+      router.refresh();
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
     <form action={submit} className="panel grid gap-4 p-5">
       <h2 className="text-lg font-black">Create simulated borrower</h2>
@@ -42,6 +52,11 @@ export function BorrowerForm() {
         Notes
         <textarea name="notes" className="input min-h-20" defaultValue="Synthetic profile for simulator testing." />
       </label>
+      {error ? (
+        <p role="alert" className="text-sm font-bold text-[color:var(--red)]">
+          {error}
+        </p>
+      ) : null}
       <button className="button w-fit" disabled={busy}>
         {busy ? "Creating..." : "Create borrower"}
       </button>
@@ -52,13 +67,22 @@ export function BorrowerForm() {
 export function ApplicationForm({ borrowers }: { borrowers: Borrower[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function submit(formData: FormData) {
     setBusy(true);
-    const body = Object.fromEntries(formData.entries());
-    await fetch("/api/applications", { method: "POST", body: JSON.stringify(body) });
-    setBusy(false);
-    router.refresh();
+    setError(null);
+    try {
+      const body = Object.fromEntries(formData.entries());
+      await apiFetch("/api/applications", { method: "POST", body: JSON.stringify(body) });
+      router.refresh();
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
     <form action={submit} className="panel grid gap-4 p-4">
       <div>
@@ -91,6 +115,11 @@ export function ApplicationForm({ borrowers }: { borrowers: Borrower[] }) {
           <Field name="collateralValue" label="Collateral value" type="number" defaultValue="0" />
         </div>
       </details>
+      {error ? (
+        <p role="alert" className="text-sm font-bold text-[color:var(--red)]">
+          {error}
+        </p>
+      ) : null}
       <button className="button w-fit" disabled={busy}>
         {busy ? "Creating..." : "Create application"}
       </button>
@@ -102,11 +131,23 @@ export function PolicyEditor({ policy }: { policy: RiskPolicyProfile }) {
   const router = useRouter();
   const [draft, setDraft] = useState(policy);
   const [saved, setSaved] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function save() {
-    await fetch(`/api/risk-policies/${policy.id}`, { method: "PUT", body: JSON.stringify(draft) });
-    setSaved(true);
-    router.refresh();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/risk-policies/${policy.id}`, { method: "PUT", body: JSON.stringify(draft) });
+      setSaved(true);
+      router.refresh();
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
     <div className="panel p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -116,14 +157,27 @@ export function PolicyEditor({ policy }: { policy: RiskPolicyProfile }) {
         </div>
         <div className="flex items-center gap-2">
           {!saved ? <span className="text-xs font-bold text-[color:var(--amber)]">Unsaved changes</span> : null}
-          <button className="button secondary" onClick={() => setDraft(policy)}>
+          <button
+            className="button secondary"
+            onClick={() => {
+              setDraft(policy);
+              setSaved(true);
+              setError(null);
+            }}
+            disabled={busy}
+          >
             Reset
           </button>
-          <button className="button" onClick={save}>
-            Save version
+          <button className="button" onClick={save} disabled={busy || saved}>
+            {busy ? "Saving..." : "Save version"}
           </button>
         </div>
       </div>
+      {error ? (
+        <p role="alert" className="mt-3 text-sm font-bold text-[color:var(--red)]">
+          {error}
+        </p>
+      ) : null}
       <div className="mt-5 grid gap-4">
         {draft.signalConfigs.map((config) => (
           <div key={config.signalKey} className="grid gap-2 border-t border-[color:var(--line)] pt-4 md:grid-cols-[190px_1fr_76px] md:items-center">
@@ -132,7 +186,10 @@ export function PolicyEditor({ policy }: { policy: RiskPolicyProfile }) {
                 type="checkbox"
                 checked={config.enabled}
                 onChange={(event) => {
-                  setDraft({ ...draft, signalConfigs: draft.signalConfigs.map((item) => (item.signalKey === config.signalKey ? { ...item, enabled: event.target.checked } : item)) });
+                  setDraft({
+                    ...draft,
+                    signalConfigs: draft.signalConfigs.map((item) => (item.signalKey === config.signalKey ? { ...item, enabled: event.target.checked } : item))
+                  });
                   setSaved(false);
                 }}
               />
@@ -145,7 +202,10 @@ export function PolicyEditor({ policy }: { policy: RiskPolicyProfile }) {
               step="0.5"
               value={config.weight}
               onChange={(event) => {
-                setDraft({ ...draft, signalConfigs: draft.signalConfigs.map((item) => (item.signalKey === config.signalKey ? { ...item, weight: Number(event.target.value) } : item)) });
+                setDraft({
+                  ...draft,
+                  signalConfigs: draft.signalConfigs.map((item) => (item.signalKey === config.signalKey ? { ...item, weight: Number(event.target.value) } : item))
+                });
                 setSaved(false);
               }}
             />

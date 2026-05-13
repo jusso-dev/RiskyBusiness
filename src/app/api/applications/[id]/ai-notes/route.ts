@@ -1,7 +1,9 @@
 import { aiRiskNotes } from "@/lib/data";
-import { json } from "@/lib/api";
+import { json, withErrorHandling } from "@/lib/api";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+type RouteContext = { params: Promise<{ id: string }> };
+
+export const GET = withErrorHandling(async (_request: Request, context: RouteContext) => {
+  const { id } = await context.params;
   return json(aiRiskNotes.filter((note) => note.applicationId === id));
-}
+});

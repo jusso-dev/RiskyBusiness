@@ -1,22 +1,26 @@
-import { audit, auditLogs, organisationId, policyProfiles } from "@/lib/data";
-import { badRequest, json, parseJson } from "@/lib/api";
+import { audit, auditLogs, nextEntityId, organisationId, policyProfiles } from "@/lib/data";
+import { json, parseJsonBody, withErrorHandling } from "@/lib/api";
+import { ConflictError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { policySchema } from "@/lib/validation";
 
-export async function GET() {
-  return json(policyProfiles);
-}
+export const GET = withErrorHandling(async () => json(policyProfiles));
 
-export async function POST(request: Request) {
-  const parsed = policySchema.safeParse(await parseJson(request));
-  if (!parsed.success) return badRequest(parsed.error.flatten());
+export const POST = withErrorHandling(async (request: Request) => {
+  const data = await parseJsonBody(request, policySchema);
+  if (policyProfiles.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) {
+    throw new ConflictError(`Policy profile '${data.name}' already exists`);
+  }
+  const now = new Date().toISOString();
   const policy = {
-    id: `p${policyProfiles.length + 1}`,
+    id: nextEntityId("p", policyProfiles),
     organisationId,
-    ...parsed.data,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    ...data,
+    createdAt: now,
+    updatedAt: now
   };
   policyProfiles.push(policy);
   auditLogs.unshift(audit("policy", policy.id, "policy_profile_created", `Policy profile ${policy.name} created.`));
+  logger.info("Policy profile created", { id: policy.id, name: policy.name });
   return json(policy, { status: 201 });
-}
+});

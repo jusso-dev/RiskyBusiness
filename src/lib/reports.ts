@@ -1,6 +1,8 @@
 import { currency } from "./utils";
 import type { AiRiskNote, Borrower, LoanApplication, RiskPolicyProfile, ScoreResult } from "@/types/domain";
 
+const TOP_DRIVERS = 5;
+
 export function applicationMarkdownReport({
   borrower,
   application,
@@ -14,7 +16,7 @@ export function applicationMarkdownReport({
   score: ScoreResult;
   note?: AiRiskNote;
 }) {
-  const lines = [
+  const lines: string[] = [
     `# RiskyBusiness Simulated Application Report`,
     ``,
     `> RiskyBusiness is a simulation and portfolio project only. It does not provide financial advice, credit advice, lending decisions, or real-world loan approvals.`,
@@ -46,14 +48,16 @@ export function applicationMarkdownReport({
     ``,
     ...[...score.signals]
       .sort((a, b) => b.weightedScore - a.weightedScore)
-      .slice(0, 5)
-      .map((signal) => `- ${signal.name}: ${Math.round(signal.normalizedScore)}/100, weight ${signal.weight}`),
+      .slice(0, TOP_DRIVERS)
+      .map((signal) => `- ${escapeMarkdown(signal.name)}: ${Math.round(signal.normalizedScore)}/100, weight ${signal.weight}`),
     ``,
     `## Signal Breakdown`,
     ``,
     `| Signal | Raw value | Score | Weight | Status |`,
     `|---|---:|---:|---:|---|`,
-    ...score.signals.map((signal) => `| ${signal.name} | ${Number(signal.rawValue).toFixed(2)} | ${Math.round(signal.normalizedScore)} | ${signal.weight} | ${signal.thresholdStatus} |`)
+    ...score.signals.map((signal) =>
+      `| ${escapeMarkdown(signal.name)} | ${formatRaw(signal.rawValue)} | ${Math.round(signal.normalizedScore)} | ${signal.weight} | ${signal.thresholdStatus} |`
+    )
   ];
 
   if (note) {
@@ -61,4 +65,13 @@ export function applicationMarkdownReport({
   }
 
   return lines.join("\n");
+}
+
+function formatRaw(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  return Number.isInteger(value) ? value.toString() : value.toFixed(2);
+}
+
+function escapeMarkdown(value: string): string {
+  return value.replace(/\|/g, "\\|");
 }

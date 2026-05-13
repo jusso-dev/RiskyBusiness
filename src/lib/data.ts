@@ -1,6 +1,8 @@
+import { shortId } from "./ids";
 import type { AiRiskNote, AuditLog, Borrower, LoanApplication, RiskPolicyProfile, RiskSignal, ScoreResult, SimulationRun } from "@/types/domain";
 
-const now = "2026-05-11T10:00:00.000Z";
+const SEED_TIMESTAMP = "2026-05-11T10:00:00.000Z";
+
 export const organisationId = "org-demo";
 
 export const riskSignals: RiskSignal[] = [
@@ -68,7 +70,29 @@ export const auditLogs: AuditLog[] = [
   auditEntry("policy", "p2", "policy_profile_created", "Balanced risk policy profile created.")
 ];
 
-function signal(key: string, name: string, description: string, category: RiskSignal["category"], direction: RiskSignal["direction"], minValue: number, maxValue: number, warningThreshold: number, highRiskThreshold: number, weight: number): RiskSignal {
+export function nextEntityId(prefix: string, existing: ReadonlyArray<{ id: string }>): string {
+  const numericIds = existing
+    .map((item) => {
+      const match = item.id.match(new RegExp(`^${prefix}(\\d+)$`));
+      return match ? Number(match[1]) : 0;
+    })
+    .filter((value) => Number.isFinite(value));
+  const next = numericIds.length ? Math.max(...numericIds) + 1 : 1;
+  return `${prefix}${next}`;
+}
+
+function signal(
+  key: string,
+  name: string,
+  description: string,
+  category: RiskSignal["category"],
+  direction: RiskSignal["direction"],
+  minValue: number,
+  maxValue: number,
+  warningThreshold: number,
+  highRiskThreshold: number,
+  weight: number
+): RiskSignal {
   return {
     id: `s-${key}`,
     key,
@@ -83,12 +107,34 @@ function signal(key: string, name: string, description: string, category: RiskSi
     warningThreshold,
     highRiskThreshold,
     explanationTemplate: `${name} produced a {score}/100 simulated risk contribution from raw value {raw}.`,
-    createdAt: now,
-    updatedAt: now
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP
   };
 }
 
-function borrower(id: string, firstName: string, lastName: string, age: number, employmentStatus: Borrower["employmentStatus"], employmentLengthMonths: number, annualIncome: number, monthlyIncome: number, monthlyExpenses: number, existingDebtMonthlyPayments: number, creditScore: number, creditHistoryLengthMonths: number, recentDefaultsCount: number, recentHardInquiriesCount: number, addressStabilityMonths: number, dependants: number, residencyStatus: string, industry: string, savingsBalance: number, bankTransactionRiskLevel: Borrower["bankTransactionRiskLevel"], notes: string): Borrower {
+function borrower(
+  id: string,
+  firstName: string,
+  lastName: string,
+  age: number,
+  employmentStatus: Borrower["employmentStatus"],
+  employmentLengthMonths: number,
+  annualIncome: number,
+  monthlyIncome: number,
+  monthlyExpenses: number,
+  existingDebtMonthlyPayments: number,
+  creditScore: number,
+  creditHistoryLengthMonths: number,
+  recentDefaultsCount: number,
+  recentHardInquiriesCount: number,
+  addressStabilityMonths: number,
+  dependants: number,
+  residencyStatus: string,
+  industry: string,
+  savingsBalance: number,
+  bankTransactionRiskLevel: Borrower["bankTransactionRiskLevel"],
+  notes: string
+): Borrower {
   return {
     id,
     organisationId,
@@ -112,11 +158,22 @@ function borrower(id: string, firstName: string, lastName: string, age: number, 
     savingsBalance,
     bankTransactionRiskLevel,
     notes,
-    createdAt: now
+    createdAt: SEED_TIMESTAMP
   };
 }
 
-function app(id: string, borrowerId: string, loanType: LoanApplication["loanType"], requestedAmount: number, requestedTermMonths: number, declaredPurpose: string, interestRateEstimate: number, collateralType: string, collateralValue: number, status: LoanApplication["status"]): LoanApplication {
+function app(
+  id: string,
+  borrowerId: string,
+  loanType: LoanApplication["loanType"],
+  requestedAmount: number,
+  requestedTermMonths: number,
+  declaredPurpose: string,
+  interestRateEstimate: number,
+  collateralType: string,
+  collateralValue: number,
+  status: LoanApplication["status"]
+): LoanApplication {
   return {
     id,
     organisationId,
@@ -128,14 +185,20 @@ function app(id: string, borrowerId: string, loanType: LoanApplication["loanType
     interestRateEstimate,
     collateralType,
     collateralValue,
-    createdAt: now,
+    createdAt: SEED_TIMESTAMP,
     status
   };
 }
 
-function policy(id: string, name: string, description: string, approveBelowScore: number, manualReviewBelowScore: number, factor: number): RiskPolicyProfile;
-function policy(id: string, name: string, description: string, approveBelowScore: number, manualReviewBelowScore: number, declineAtOrAboveScore: number, factor: number): RiskPolicyProfile;
-function policy(id: string, name: string, description: string, approveBelowScore: number, manualReviewBelowScore: number, declineAtOrAboveScore: number, factor = 1): RiskPolicyProfile {
+function policy(
+  id: string,
+  name: string,
+  description: string,
+  approveBelowScore: number,
+  manualReviewBelowScore: number,
+  declineAtOrAboveScore: number,
+  factor = 1
+): RiskPolicyProfile {
   return {
     id,
     organisationId,
@@ -151,8 +214,8 @@ function policy(id: string, name: string, description: string, approveBelowScore
       warningThreshold: s.warningThreshold,
       highRiskThreshold: s.highRiskThreshold
     })),
-    createdAt: now,
-    updatedAt: now
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP
   };
 }
 
@@ -162,7 +225,7 @@ export function audit(entityType: string, entityId: string, eventType: string, m
 
 function auditEntry(entityType: string, entityId: string, eventType: string, message: string): AuditLog {
   return {
-    id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: shortId("log"),
     organisationId,
     entityType,
     entityId,

@@ -1,21 +1,20 @@
-import { borrowers, auditLogs, audit, organisationId } from "@/lib/data";
-import { badRequest, json, parseJson } from "@/lib/api";
+import { audit, auditLogs, borrowers, nextEntityId, organisationId } from "@/lib/data";
+import { json, parseJsonBody, withErrorHandling } from "@/lib/api";
 import { borrowerSchema } from "@/lib/validation";
+import { logger } from "@/lib/logger";
 
-export async function GET() {
-  return json(borrowers);
-}
+export const GET = withErrorHandling(async () => json(borrowers));
 
-export async function POST(request: Request) {
-  const parsed = borrowerSchema.safeParse(await parseJson(request));
-  if (!parsed.success) return badRequest(parsed.error.flatten());
+export const POST = withErrorHandling(async (request: Request) => {
+  const data = await parseJsonBody(request, borrowerSchema);
   const borrower = {
-    id: `b${borrowers.length + 1}`,
+    id: nextEntityId("b", borrowers),
     organisationId,
-    ...parsed.data,
+    ...data,
     createdAt: new Date().toISOString()
   };
   borrowers.push(borrower);
   auditLogs.unshift(audit("borrower", borrower.id, "borrower_created", `Simulated borrower ${borrower.firstName} ${borrower.lastName} created.`));
+  logger.info("Borrower created", { id: borrower.id });
   return json(borrower, { status: 201 });
-}
+});
