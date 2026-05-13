@@ -1,6 +1,4 @@
 import { riskSignals } from "@/lib/data";
-import { json } from "@/lib/api";
+import { json, withErrorHandling } from "@/lib/api";
 
-export async function GET() {
-  return json(riskSignals);
-}
+export const GET = withErrorHandling(async () => json(riskSignals));

@@ -1,20 +1,25 @@
 import { riskSignals } from "@/lib/data";
-import { badRequest, json, notFound, parseJson } from "@/lib/api";
-import { z } from "zod";
+import { json, parseJsonBody, withErrorHandling } from "@/lib/api";
+import { NotFoundError, ValidationError } from "@/lib/errors";
+import { signalUpdateSchema } from "@/lib/validation";
 
-const signalUpdate = z.object({
-  enabled: z.boolean().optional(),
-  weight: z.coerce.number().min(0).max(50).optional(),
-  warningThreshold: z.coerce.number().min(0).max(100).optional(),
-  highRiskThreshold: z.coerce.number().min(0).max(100).optional()
-});
+type RouteContext = { params: Promise<{ id: string }> };
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export const PUT = withErrorHandling(async (request: Request, context: RouteContext) => {
+  const { id } = await context.params;
   const signal = riskSignals.find((item) => item.id === id || item.key === id);
-  if (!signal) return notFound("Risk signal not found");
-  const parsed = signalUpdate.safeParse(await parseJson(request));
-  if (!parsed.success) return badRequest(parsed.error.flatten());
-  Object.assign(signal, parsed.data, { updatedAt: new Date().toISOString() });
+  if (!signal) throw new NotFoundError("Risk signal", id);
+  const data = await parseJsonBody(request, signalUpdateSchema);
+
+  const nextWarning = data.warningThreshold ?? signal.warningThreshold;
+  const nextHigh = data.highRiskThreshold ?? signal.highRiskThreshold;
+  if (nextWarning > nextHigh) {
+    throw new ValidationError("highRiskThreshold must be greater than or equal to warningThreshold", {
+      warningThreshold: nextWarning,
+      highRiskThreshold: nextHigh
+    });
+  }
+
+  Object.assign(signal, data, { updatedAt: new Date().toISOString() });
   return json(signal);
-}
+});

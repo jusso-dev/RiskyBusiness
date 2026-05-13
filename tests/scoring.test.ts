@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { borrowers, loanApplications, policyProfiles } from "../src/lib/data";
 import { MockAiRiskNarrativeProvider } from "../src/lib/ai";
-import { borrowerSchema, applicationSchema } from "../src/lib/validation";
-import { cashBufferMonths, debtToIncome, loanToIncome, normalizeCreditScore, scoreApplication } from "../src/lib/scoring";
+import { applicationSchema, borrowerSchema, policySchema } from "../src/lib/validation";
+import { cashBufferMonths, debtToIncome, decide, loanToIncome, normalizeCreditScore, scoreApplication } from "../src/lib/scoring";
 
 describe("RiskyBusiness scoring engine", () => {
   const borrower = borrowers[4];
@@ -51,5 +51,37 @@ describe("RiskyBusiness scoring engine", () => {
   it("validates borrower and application input", () => {
     expect(borrowerSchema.safeParse(borrower).success).toBe(true);
     expect(applicationSchema.safeParse(application).success).toBe(true);
+  });
+
+  it("decides decline, manual review, or approve based on policy thresholds", () => {
+    expect(decide(policy.declineAtOrAboveScore, policy)).toBe("decline");
+    expect(decide(policy.declineAtOrAboveScore + 5, policy)).toBe("decline");
+    expect(decide(policy.approveBelowScore, policy)).toBe("manual_review");
+    expect(decide(Math.max(0, policy.approveBelowScore - 1), policy)).toBe("approve");
+  });
+
+  it("rejects policies whose thresholds are out of order", () => {
+    const result = policySchema.safeParse({
+      name: "Broken",
+      approveBelowScore: 80,
+      manualReviewBelowScore: 40,
+      declineAtOrAboveScore: 60,
+      signalConfigs: [{ signalKey: "credit_score", enabled: true, weight: 1, warningThreshold: 10, highRiskThreshold: 5 }]
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects application with collateral value but no collateral type", () => {
+    const result = applicationSchema.safeParse({
+      borrowerId: borrower.id,
+      loanType: "personal_loan",
+      requestedAmount: 10000,
+      requestedTermMonths: 24,
+      declaredPurpose: "test",
+      interestRateEstimate: 9,
+      collateralType: "none",
+      collateralValue: 5000
+    });
+    expect(result.success).toBe(false);
   });
 });

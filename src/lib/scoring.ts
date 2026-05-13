@@ -1,77 +1,115 @@
 import { borrowers, riskSignals } from "./data";
+import { NotFoundError } from "./errors";
+import { id } from "./ids";
+import { CREDIT_SCORE_MAX, CREDIT_SCORE_MIN } from "./validation";
 import type { Borrower, Decision, LoanApplication, RiskCategory, RiskPolicyProfile, ScoreResult, ScoreSignalResult, ThresholdStatus } from "@/types/domain";
 
 export const modelVersion = "riskybusiness-rules-v1";
 
-const categoryKeys: RiskCategory[] = ["affordability", "credit_history", "stability", "behavioural", "collateral", "application"];
+const CATEGORY_KEYS: readonly RiskCategory[] = ["affordability", "credit_history", "stability", "behavioural", "collateral", "application"];
 
-export function debtToIncome(borrower: Borrower) {
+const TRANSACTION_RISK_MAP: Record<Borrower["bankTransactionRiskLevel"], number> = { low: 0, medium: 1, high: 2 };
+
+const INDUSTRY_RISK_MAP: Record<string, number> = {
+  Healthcare: 0,
+  Education: 0,
+  Technology: 0.5,
+  "Professional services": 0.5,
+  Logistics: 0.75,
+  Manufacturing: 1,
+  Construction: 1.25,
+  Transport: 1.2,
+  Retail: 1.4,
+  Hospitality: 1.5
+};
+const INDUSTRY_RISK_DEFAULT = 0.8;
+
+const EMPLOYMENT_STABILITY: Record<Borrower["employmentStatus"], number> = {
+  employed: 1,
+  self_employed: 0.7,
+  contract: 0.55,
+  retired: 0.4,
+  unemployed: 0.2
+};
+
+const NO_COLLATERAL_LTV = 1.2;
+
+export function debtToIncome(borrower: Borrower): number {
   return safeRatio(borrower.existingDebtMonthlyPayments, borrower.monthlyIncome);
 }
 
-export function loanToIncome(application: LoanApplication, borrower: Borrower) {
+export function loanToIncome(application: LoanApplication, borrower: Borrower): number {
   return safeRatio(application.requestedAmount, borrower.annualIncome);
 }
 
-export function cashBufferMonths(borrower: Borrower) {
+export function cashBufferMonths(borrower: Borrower): number {
   return safeRatio(borrower.savingsBalance, borrower.monthlyExpenses);
 }
 
-export function normalizeCreditScore(score: number) {
-  return clamp(((850 - score) / 550) * 100);
+export function normalizeCreditScore(score: number): number {
+  const range = CREDIT_SCORE_MAX - CREDIT_SCORE_MIN;
+  return clamp(((CREDIT_SCORE_MAX - score) / range) * 100);
 }
 
 export function decide(score: number, policy: RiskPolicyProfile): Decision {
-  if (score < policy.approveBelowScore) return "approve";
-  if (score < policy.declineAtOrAboveScore && score < policy.manualReviewBelowScore) return "manual_review";
-  if (score < policy.declineAtOrAboveScore) return "manual_review";
-  return "decline";
+  if (score >= policy.declineAtOrAboveScore) return "decline";
+  if (score >= policy.approveBelowScore) return "manual_review";
+  return "approve";
 }
 
-export function scoreApplication(application: LoanApplication, policy: RiskPolicyProfile, borrowerOverride?: Partial<Borrower>, applicationOverride?: Partial<LoanApplication>): ScoreResult {
+export function scoreApplication(
+  application: LoanApplication,
+  policy: RiskPolicyProfile,
+  borrowerOverride?: Partial<Borrower>,
+  applicationOverride?: Partial<LoanApplication>
+): ScoreResult {
   const baseBorrower = borrowers.find((b) => b.id === application.borrowerId);
-  if (!baseBorrower) throw new Error(`Borrower ${application.borrowerId} not found`);
+  if (!baseBorrower) throw new NotFoundError("Borrower", application.borrowerId);
 
-  const borrower = { ...baseBorrower, ...borrowerOverride };
-  const loan = { ...application, ...applicationOverride };
-  const signalResults = policy.signalConfigs
-    .filter((config) => config.enabled)
-    .map((config) => {
-      const signal = riskSignals.find((s) => s.key === config.signalKey);
-      if (!signal) return null;
-      const rawValue = calculateRaw(signal.key, borrower, loan);
-      const normalizedScore = normalizeSignal(signal.key, rawValue);
-      const weightedScore = normalizedScore * config.weight;
-      const thresholdStatus = threshold(normalizedScore, config.warningThreshold, config.highRiskThreshold);
-      return {
-        signalKey: signal.key,
-        name: signal.name,
-        category: signal.category,
-        rawValue,
-        normalizedScore,
-        weightedScore,
-        weight: config.weight,
-        thresholdStatus,
-        explanation: signal.explanationTemplate.replace("{score}", Math.round(normalizedScore).toString()).replace("{raw}", formatRaw(rawValue))
-      } satisfies ScoreSignalResult;
-    })
-    .filter(Boolean) as ScoreSignalResult[];
+  const borrower: Borrower = { ...baseBorrower, ...borrowerOverride };
+  const loan: LoanApplication = { ...application, ...applicationOverride };
 
-  const totalWeight = signalResults.reduce((sum, item) => sum + item.weight, 0) || 1;
-  const totalRiskScore = clamp(signalResults.reduce((sum, item) => sum + item.weightedScore, 0) / totalWeight);
-  const decision = decide(totalRiskScore, policy);
+  const signalResults: ScoreSignalResult[] = [];
+  for (const config of policy.signalConfigs) {
+    if (!config.enabled) continue;
+    const signal = riskSignals.find((s) => s.key === config.signalKey);
+    if (!signal) continue;
+    const rawValue = calculateRaw(signal.key, borrower, loan);
+    const normalizedScore = normalizeSignal(signal.key, rawValue);
+    const weightedScore = normalizedScore * config.weight;
+    signalResults.push({
+      signalKey: signal.key,
+      name: signal.name,
+      category: signal.category,
+      rawValue,
+      normalizedScore,
+      weightedScore,
+      weight: config.weight,
+      thresholdStatus: threshold(normalizedScore, config.warningThreshold, config.highRiskThreshold),
+      explanation: signal.explanationTemplate
+        .replace("{score}", Math.round(normalizedScore).toString())
+        .replace("{raw}", formatRaw(rawValue))
+    });
+  }
+
+  const totalWeight = signalResults.reduce((sum, item) => sum + item.weight, 0);
+  const totalRiskScore = totalWeight > 0 ? clamp(signalResults.reduce((sum, item) => sum + item.weightedScore, 0) / totalWeight) : 0;
+
   const categoryScores = Object.fromEntries(
-    categoryKeys.map((category) => {
+    CATEGORY_KEYS.map((category) => {
       const signals = signalResults.filter((s) => s.category === category);
       const weight = signals.reduce((sum, item) => sum + item.weight, 0);
-      return [category, weight ? clamp(signals.reduce((sum, item) => sum + item.weightedScore, 0) / weight) : 0];
+      const value = weight > 0 ? clamp(signals.reduce((sum, item) => sum + item.weightedScore, 0) / weight) : 0;
+      return [category, value];
     })
   ) as Record<RiskCategory, number>;
 
+  const decision = decide(totalRiskScore, policy);
   const topDrivers = [...signalResults].sort((a, b) => b.weightedScore - a.weightedScore).slice(0, 3);
+  const driversLabel = topDrivers.length ? topDrivers.map((d) => d.name).join(", ") : "no enabled signals";
 
   return {
-    id: `score-${application.id}-${policy.id}-${Date.now()}`,
+    id: id("score"),
     applicationId: application.id,
     policyProfileId: policy.id,
     totalRiskScore,
@@ -83,7 +121,7 @@ export function scoreApplication(application: LoanApplication, policy: RiskPolic
     behaviouralScore: categoryScores.behavioural,
     collateralScore: categoryScores.collateral,
     applicationScore: categoryScores.application,
-    explanationSummary: `Simulated ${decisionLabel(decision)} with ${Math.round(totalRiskScore)}/100 risk. Main drivers: ${topDrivers.map((d) => d.name).join(", ")}.`,
+    explanationSummary: `Simulated ${decisionLabel(decision)} with ${Math.round(totalRiskScore)}/100 risk. Main drivers: ${driversLabel}.`,
     modelVersion,
     createdAt: new Date().toISOString(),
     signals: signalResults
@@ -97,28 +135,14 @@ export function comparePolicies(application: LoanApplication, policies: RiskPoli
   }));
 }
 
-export function calculateRaw(key: string, borrower: Borrower, application: LoanApplication) {
-  const transactionMap = { low: 0, medium: 1, high: 2 };
-  const industryMap: Record<string, number> = {
-    Healthcare: 0,
-    Education: 0,
-    Technology: 0.5,
-    "Professional services": 0.5,
-    Logistics: 0.75,
-    Manufacturing: 1,
-    Construction: 1.25,
-    Transport: 1.2,
-    Retail: 1.4,
-    Hospitality: 1.5
-  };
-
+export function calculateRaw(key: string, borrower: Borrower, application: LoanApplication): number {
   switch (key) {
     case "credit_score":
       return borrower.creditScore;
     case "debt_to_income_ratio":
       return debtToIncome(borrower);
     case "income_stability":
-      return borrower.employmentStatus === "employed" ? 1 : borrower.employmentStatus === "self_employed" ? 0.7 : borrower.employmentStatus === "contract" ? 0.55 : 0.2;
+      return EMPLOYMENT_STABILITY[borrower.employmentStatus] ?? 0.2;
     case "employment_length":
       return borrower.employmentLengthMonths;
     case "recent_defaults":
@@ -132,13 +156,13 @@ export function calculateRaw(key: string, borrower: Borrower, application: LoanA
     case "loan_to_income_ratio":
       return loanToIncome(application, borrower);
     case "loan_to_value_ratio":
-      return application.collateralValue > 0 ? safeRatio(application.requestedAmount, application.collateralValue) : 1.2;
+      return application.collateralValue > 0 ? safeRatio(application.requestedAmount, application.collateralValue) : NO_COLLATERAL_LTV;
     case "transaction_risk":
-      return transactionMap[borrower.bankTransactionRiskLevel];
+      return TRANSACTION_RISK_MAP[borrower.bankTransactionRiskLevel];
     case "expense_ratio":
       return safeRatio(borrower.monthlyExpenses, borrower.monthlyIncome);
     case "industry_risk":
-      return industryMap[borrower.industry] ?? 0.8;
+      return INDUSTRY_RISK_MAP[borrower.industry] ?? INDUSTRY_RISK_DEFAULT;
     case "dependant_load":
       return borrower.dependants;
     case "requested_term_risk":
@@ -148,7 +172,7 @@ export function calculateRaw(key: string, borrower: Borrower, application: LoanA
   }
 }
 
-export function normalizeSignal(key: string, raw: number) {
+export function normalizeSignal(key: string, raw: number): number {
   switch (key) {
     case "credit_score":
       return normalizeCreditScore(raw);
@@ -186,7 +210,7 @@ export function normalizeSignal(key: string, raw: number) {
         [1.5, 100]
       ]);
     case "transaction_risk":
-      return raw * 50;
+      return clamp(raw * 50);
     case "expense_ratio":
       return piecewise(raw, [
         [0.35, 18],
@@ -195,7 +219,7 @@ export function normalizeSignal(key: string, raw: number) {
         [1, 100]
       ]);
     case "industry_risk":
-      return raw * 50;
+      return clamp(raw * 50);
     case "dependant_load":
       return clamp(raw * 16);
     case "requested_term_risk":
@@ -216,42 +240,58 @@ export function threshold(score: number, warning: number, high: number): Thresho
   return "good";
 }
 
-function piecewise(value: number, points: Array<[number, number]>) {
-  if (value <= points[0][0]) return clamp((value / points[0][0]) * points[0][1]);
+function piecewise(value: number, points: Array<[number, number]>): number {
+  if (points.length === 0) return 0;
+  const [firstX, firstY] = points[0];
+  if (value <= firstX) {
+    return firstX === 0 ? clamp(firstY) : clamp((value / firstX) * firstY);
+  }
   for (let i = 1; i < points.length; i++) {
     const [x1, y1] = points[i - 1];
     const [x2, y2] = points[i];
     if (value <= x2) {
-      const ratio = (value - x1) / (x2 - x1);
+      const span = x2 - x1;
+      const ratio = span === 0 ? 0 : (value - x1) / span;
       return clamp(y1 + ratio * (y2 - y1));
     }
   }
   return 100;
 }
 
-function inverse(value: number, min: number, max: number) {
-  return clamp(100 - ((value - min) / (max - min)) * 100);
+function inverse(value: number, min: number, max: number): number {
+  const span = max - min;
+  if (span <= 0) return 0;
+  return clamp(100 - ((value - min) / span) * 100);
 }
 
-function safeRatio(numerator: number, denominator: number) {
-  if (!denominator) return 1;
+function safeRatio(numerator: number, denominator: number): number {
+  if (denominator <= 0) return numerator > 0 ? 1 : 0;
   return numerator / denominator;
 }
 
-function clamp(value: number) {
+function clamp(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, value));
 }
 
-function confidenceFromSpread(signals: ScoreSignalResult[]) {
+function confidenceFromSpread(signals: ScoreSignalResult[]): number {
+  if (signals.length === 0) return 0;
   const highRiskCount = signals.filter((s) => s.thresholdStatus === "high_risk").length;
   const warningCount = signals.filter((s) => s.thresholdStatus === "warning").length;
   return clamp(92 - warningCount * 2 - highRiskCount * 3);
 }
 
-function decisionLabel(decision: Decision) {
-  return decision === "approve" ? "approve" : decision === "manual_review" ? "manual review" : "decline";
+function decisionLabel(decision: Decision): string {
+  switch (decision) {
+    case "approve":
+      return "approve";
+    case "manual_review":
+      return "manual review";
+    case "decline":
+      return "decline";
+  }
 }
 
-function formatRaw(value: number) {
+function formatRaw(value: number): string {
   return Number.isInteger(value) ? `${value}` : value.toFixed(2);
 }

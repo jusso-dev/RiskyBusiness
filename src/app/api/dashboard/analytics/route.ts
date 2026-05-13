@@ -1,6 +1,4 @@
 import { analytics } from "@/lib/analytics";
-import { json } from "@/lib/api";
+import { json, withErrorHandling } from "@/lib/api";
 
-export async function GET() {
-  return json(analytics());
-}
+export const GET = withErrorHandling(async () => json(analytics()));

@@ -3,32 +3,57 @@
 import { Brain, FileDown, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { apiFetch, formatHttpError } from "@/lib/client";
+import type { AiRiskNote, ScoreResult } from "@/types/domain";
+
+type Busy = "score" | "note" | "report" | null;
 
 export function ApplicationActions({ applicationId }: { applicationId: string }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
   const [report, setReport] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   async function runScore() {
     setBusy("score");
-    await fetch(`/api/applications/${applicationId}/score`, { method: "POST", body: JSON.stringify({ policyProfileId: "p2" }) });
-    setBusy(null);
-    router.refresh();
+    setError(null);
+    try {
+      await apiFetch<ScoreResult>(`/api/applications/${applicationId}/score`, {
+        method: "POST",
+        body: JSON.stringify({ policyProfileId: "p2" })
+      });
+      router.refresh();
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function generateNote() {
     setBusy("note");
-    await fetch(`/api/applications/${applicationId}/ai-note`, { method: "POST" });
-    setBusy(null);
-    router.refresh();
+    setError(null);
+    try {
+      await apiFetch<AiRiskNote>(`/api/applications/${applicationId}/ai-note`, { method: "POST" });
+      router.refresh();
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function exportReport() {
     setBusy("report");
-    const response = await fetch(`/api/applications/${applicationId}/report`);
-    const payload = await response.json();
-    setReport(payload.markdown);
-    setBusy(null);
+    setError(null);
+    try {
+      const payload = await apiFetch<{ markdown: string }>(`/api/applications/${applicationId}/report`);
+      setReport(payload.markdown);
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -47,6 +72,11 @@ export function ApplicationActions({ applicationId }: { applicationId: string })
           Export Markdown
         </button>
       </div>
+      {error ? (
+        <p role="alert" className="text-sm font-bold text-[color:var(--red)]">
+          {error}
+        </p>
+      ) : null}
       {report ? (
         <textarea className="input min-h-64 font-mono text-xs leading-5" value={report} readOnly aria-label="Markdown report" />
       ) : null}

@@ -1,5 +1,14 @@
 import { aiRiskNotes, borrowers, loanApplications, policyProfiles, scoreResults } from "./data";
 import { scoreApplication } from "./scoring";
+import type { RiskPolicyProfile } from "@/types/domain";
+
+const DEFAULT_POLICY_NAME = "Balanced";
+
+export function balancedPolicy(): RiskPolicyProfile {
+  const found = policyProfiles.find((p) => p.name === DEFAULT_POLICY_NAME) ?? policyProfiles[0];
+  if (!found) throw new Error("No policy profiles configured");
+  return found;
+}
 
 export function applicationsWithBorrowers() {
   return loanApplications.map((application) => ({
@@ -13,7 +22,7 @@ export function applicationDetail(id: string) {
   const application = loanApplications.find((item) => item.id === id);
   if (!application) return null;
   const borrower = borrowers.find((item) => item.id === application.borrowerId);
-  const latestScore = latestScoreForApplication(id) ?? scoreApplication(application, policyProfiles.find((p) => p.name === "Balanced") ?? policyProfiles[0]);
+  const latestScore = latestScoreForApplication(id) ?? scoreApplication(application, balancedPolicy());
   return {
     application,
     borrower,
@@ -24,5 +33,7 @@ export function applicationDetail(id: string) {
 }
 
 export function latestScoreForApplication(applicationId: string) {
-  return scoreResults.filter((score) => score.applicationId === applicationId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return scoreResults
+    .filter((score) => score.applicationId === applicationId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }

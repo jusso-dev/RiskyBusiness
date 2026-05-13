@@ -2,20 +2,34 @@
 
 import { Play } from "lucide-react";
 import { useState } from "react";
+import { apiFetch, formatHttpError } from "@/lib/client";
 import type { RiskPolicyProfile, SimulationRun } from "@/types/domain";
 
 export function SimulationPanel({ policies }: { policies: RiskPolicyProfile[] }) {
   const [run, setRun] = useState<SimulationRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function start() {
     setBusy(true);
-    const response = await fetch("/api/simulations", {
-      method: "POST",
-      body: JSON.stringify({ count: 100, riskiness: "balanced", policyProfileIds: policies.slice(0, 3).map((policy) => policy.id) })
-    });
-    setRun(await response.json());
-    setBusy(false);
+    setError(null);
+    try {
+      const result = await apiFetch<SimulationRun>("/api/simulations", {
+        method: "POST",
+        body: JSON.stringify({
+          count: 100,
+          riskiness: "balanced",
+          policyProfileIds: policies.slice(0, 3).map((policy) => policy.id)
+        })
+      });
+      setRun(result);
+    } catch (err) {
+      setError(formatHttpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
     <div className="panel p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -28,6 +42,11 @@ export function SimulationPanel({ policies }: { policies: RiskPolicyProfile[] })
           {busy ? "Running..." : "Run simulation"}
         </button>
       </div>
+      {error ? (
+        <p role="alert" className="mt-3 text-sm font-bold text-[color:var(--red)]">
+          {error}
+        </p>
+      ) : null}
       {run ? (
         <table className="table mt-4">
           <thead>
@@ -44,7 +63,7 @@ export function SimulationPanel({ policies }: { policies: RiskPolicyProfile[] })
               const policy = policies.find((item) => item.id === result.policyProfileId);
               return (
                 <tr key={result.policyProfileId}>
-                  <td className="font-bold">{policy?.name}</td>
+                  <td className="font-bold">{policy?.name ?? result.policyProfileId}</td>
                   <td>{Math.round(result.approvalRate * 100)}%</td>
                   <td>{Math.round(result.manualReviewRate * 100)}%</td>
                   <td>{Math.round(result.declineRate * 100)}%</td>

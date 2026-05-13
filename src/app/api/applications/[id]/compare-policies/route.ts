@@ -1,10 +1,13 @@
 import { loanApplications, policyProfiles } from "@/lib/data";
-import { json, notFound } from "@/lib/api";
+import { json, withErrorHandling } from "@/lib/api";
+import { NotFoundError } from "@/lib/errors";
 import { comparePolicies } from "@/lib/scoring";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+type RouteContext = { params: Promise<{ id: string }> };
+
+export const POST = withErrorHandling(async (_request: Request, context: RouteContext) => {
+  const { id } = await context.params;
   const application = loanApplications.find((item) => item.id === id);
-  if (!application) return notFound("Application not found");
+  if (!application) throw new NotFoundError("Application", id);
   return json(comparePolicies(application, policyProfiles));
-}
+});
